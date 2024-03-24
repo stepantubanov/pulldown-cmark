@@ -20,6 +20,7 @@
 
 //! HTML renderer that takes an iterator of events as input.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -526,4 +527,53 @@ where
     W: Write,
 {
     HtmlWriter::new(iter, WriteWrapper(writer)).run()
+}
+
+/// # Panics
+///
+/// If display is called more than once.
+pub fn display_once<'a, I>(iter: I) -> impl std::fmt::Display + 'a
+where
+    I: Iterator<Item = Event<'a>> + 'a,
+{
+    DisplayOnce {
+        iter: RefCell::new(Some(iter)),
+    }
+}
+
+struct DisplayOnce<I> {
+    iter: RefCell<Option<I>>,
+}
+
+impl<'a, I> std::fmt::Display for DisplayOnce<I>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let iter = self
+            .iter
+            .borrow_mut()
+            .take()
+            .expect("DisplayOnce displayed more than once");
+
+        HtmlWriter::new(iter, FmtWriteWrapper(f))
+            .run()
+            .map_err(move |_| std::fmt::Error)
+    }
+}
+
+struct FmtWriteWrapper<'a, 'b>(&'a mut std::fmt::Formatter<'b>);
+
+impl StrWrite for FmtWriteWrapper<'_, '_> {
+    fn write_fmt(&mut self, args: std::fmt::Arguments) -> io::Result<()> {
+        self.0
+            .write_fmt(args)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))
+    }
+
+    fn write_str(&mut self, s: &str) -> io::Result<()> {
+        self.0
+            .write_str(s)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "fmt error"))
+    }
 }
